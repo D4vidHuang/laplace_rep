@@ -1,0 +1,10 @@
+.idea/
+week2/Zeyu/.idea/
+week2/Zeyu/**/__pycache__/
+
+week2/Zeyu/data/**/*
+!week2/Zeyu/data/**/
+!week2/Zeyu/data/**/.gitkeep
+
+week2/Zeyu/models/*
+!week2/Zeyu/models/.gitkeep
