@@ -7,4 +7,6 @@ week2/Zeyu/data/**/*
 !week2/Zeyu/data/**/.gitkeep
 
 week2/Zeyu/models/*
+week2/Yongcheng/laplace_redux_exp/data/**/*
+week2/Yongcheng/laplace_redux_exp/models/*
 !week2/Zeyu/models/.gitkeep
