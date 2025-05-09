@@ -1,0 +1,10 @@
+[deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+LaplaceRedux = "c52c1a26-f7c5-402b-80be-ba1e638ad478"
+MLDatasets = "eb30cadb-4394-5ae3-aed4-317e484a6458"
+MLUtils = "f1d291b0-491e-4a28-83b9-f70985020b54"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+ROCAnalysis = "f535d66d-59bb-5153-8d2b-ef0a426c6aff"
