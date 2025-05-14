@@ -1,0 +1,228 @@
+\documentclass[10pt]{beamer}
+
+% Setting up the Beamer theme and colors
+\usetheme{Copenhagen}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+
+% Including necessary packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{siunitx}
+\usepackage{multirow}
+\usepackage{tikz}
+
+% Configuring hyperref
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+% Title slide information
+\title{A Step Toward Quantifying Independently Reproducible Machine Learning Research}
+\subtitle{NeurIPS 2019}
+\author{Edward Raff \\[0.5cm] Presented by: Yongcheng Huang (5560950), Group 2A}
+\institute{Booz Allen Hamilton \& University of Maryland, Baltimore County}
+\date{May 12, 2025}
+
+\begin{document}
+
+% Title slide
+\begin{frame}
+    \titlepage
+\end{frame}
+
+% Outline slide
+\begin{frame}{Outline}
+    \tableofcontents
+\end{frame}
+
+\section{Why Interesting?}
+
+% Motivation slide
+\begin{frame}{Why Should We Care?}
+    \begin{itemize}
+        \item Reproducibility is critical for trust and progress in AI/ML research.
+        \item Concerns about a reproducibility crisis undermine scientific credibility.
+        \item Conferences like NeurIPS push for code sharing, but independent reproducibility remains unquantified.
+        \item \textbf{Goal}: Understand what makes ML papers independently reproducible without relying on authors' code.
+    \end{itemize}
+\end{frame}
+
+\section{How Done Now?}
+
+% Current Approaches slide
+\begin{frame}{Current Approaches to Reproducibility}
+    \begin{itemize}
+        \item Conferences encourage or mandate code submission (e.g., NeurIPS, ICML).
+        \item Authors often share code on platforms like GitHub.
+        \item Reproducibility challenges (e.g., ICLR) involve re-running authors' code.
+        \item \textbf{Limitation}: These approaches rely on authors' implementations, not independent replication.
+    \end{itemize}
+\end{frame}
+
+\section{What is Missing, and So What?}
+
+% Problem Statement slide
+\begin{frame}{What is Missing?}
+    \begin{itemize}
+        \item \textbf{Problem}: Lack of systematic study on independent reproducibility (reproducing without authors' code).
+        \item Current metrics focus on code availability, not clarity or detail in the paper itself.
+        \item \textbf{Consequences}:
+            \begin{itemize}
+                \item Unclear what paper features enable successful reproduction.
+                \item Researchers may waste time on poorly documented methods.
+                \item Hinders scientific progress and trust in published results.
+            \end{itemize}
+    \end{itemize}
+\end{frame}
+
+\section{Proposed Approach}
+
+% Study Overview slide
+\begin{frame}{Proposed Approach: Quantifying Reproducibility}
+    \begin{itemize}
+        \item Analyze 255 ML papers (1984--2017) for independent reproducibility.
+        \item Manually implement each paper’s method without using authors’ code.
+        \item Record 26 paper features (e.g., readability, equations, pseudo-code).
+        \item Use statistical analysis to identify features correlated with reproducibility.
+        \item \textbf{Outcome}: 63.5\% (162/255) papers successfully reproduced.
+    \end{itemize}
+\end{frame}
+
+% Methodology slide
+\begin{frame}{Methodology}
+    \begin{itemize}
+        \item \textbf{Paper Selection}:
+            \begin{itemize}
+                \item New algorithm/method, implemented 2012--2017, no prior code exposure.
+                \item Excluded 2018 papers to avoid time bias.
+            \end{itemize}
+        \item \textbf{Reproducibility Criteria}:
+            \begin{itemize}
+                \item $\geq 75\%$ claims confirmed with independent code.
+                \item Flexible thresholds for order-of-magnitude or ranking claims.
+            \end{itemize}
+        \item \textbf{Features}: Objective (e.g., page count), mildly subjective (e.g., tables), subjective (e.g., readability).
+    \end{itemize}
+\end{frame}
+
+\section{Experimental Questions}
+
+% Experimental Questions slide
+\begin{frame}{Experimental Questions}
+    \begin{itemize}
+        \item Which paper features predict successful independent reproduction?
+        \item Does readability impact reproducibility more than technical details like equations?
+        \item Are empirical papers easier to reproduce than theoretical ones?
+        \item Does author engagement (e.g., replying to queries) improve reproducibility?
+        \item \textbf{Setup}: Controlled analysis of 26 features across 255 papers, using statistical significance (p $\leq$ 0.05).
+    \end{itemize}
+\end{frame}
+
+\section{Key Findings}
+
+% Significant Features slide
+\begin{frame}{Key Findings: Significant Features (p $\leq$ 0.05)}
+    \begin{table}
+        \centering
+        \footnotesize
+        \begin{tabular}{l c}
+            \toprule
+            Feature & p-value \\
+            \midrule
+            Readability & $9.68 \times 10^{-25}$ \\
+            Rigor vs. Empirical & $1.55 \times 10^{-9}$ \\
+            Authors Reply & $6.01 \times 10^{-8}$ \\
+            Hyperparameters Specified & $8.45 \times 10^{-6}$ \\
+            Compute Needed & $8.75 \times 10^{-5}$ \\
+            Pseudo-Code & $2.31 \times 10^{-4}$ \\
+            Primary Topic & $7.04 \times 10^{-4}$ \\
+            Algorithm Difficulty & $2.94 \times 10^{-5}$ \\
+            Number of Tables & 0.010 \\
+            Number of Equations & 0.004 \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+% Readability Impact slide
+\begin{frame}{Readability: Strongest Predictor}
+    \begin{itemize}
+        \item \textbf{Excellent} readability (1 read needed): 100\% reproducible.
+        \item Low readability papers shorter by 3.17--5.67 pages (p = 0.035).
+        \item More equations per page reduce reproducibility (linked to readability).
+        \item \textbf{Implication}: Clear communication is critical for reproducibility.
+    \end{itemize}
+\end{frame}
+
+% Other Findings slide
+\begin{frame}{Other Findings}
+    \begin{itemize}
+        \item \textbf{Empirical/Balanced} papers more reproducible than theoretical ones.
+        \item \textbf{Pseudo-Code} helps, but step-code can reduce readability.
+        \item \textbf{Tables} aid reproducibility; graphs/plots do not.
+        \item \textbf{Author Reply}: 22/26 papers with replies reproduced (p = $6.01 \times 10^{-8}$).
+        \item \textbf{Non-Significant}: Year published, code availability, venue type, appendix presence.
+    \end{itemize}
+\end{frame}
+
+\section{Implications}
+
+% Implications slide
+\begin{frame}{Implications for ML Research}
+    \begin{itemize}
+        \item Increase page limits to allow detailed descriptions.
+        \item Prioritize readability in peer review criteria.
+        \item Encourage author engagement to clarify queries.
+        \item Re-evaluate pseudo-code: High-level steps can confuse.
+        \item Support empirical papers with practical details.
+        \item Improve cluster computing frameworks for reproducibility.
+    \end{itemize}
+\end{frame}
+
+\section{Limitations}
+
+% Limitations slide
+\begin{frame}{Limitations}
+    \begin{itemize}
+        \item Single reproducer: Results tied to author’s background (JSAT focus).
+        \item Selection bias: Papers chosen based on interest, excluding prior code exposure.
+        \item Subjective features: Readability, difficulty rely on author’s judgment.
+        \item Limited historical records: Reliant on paper cataloging notes.
+        \item No detailed failure reasons recorded (e.g., unclear notation).
+    \end{itemize}
+\end{frame}
+
+\section{Conclusion}
+
+% Conclusion slide
+\begin{frame}{Conclusion}
+    \begin{itemize}
+        \item First study quantifying independent reproducibility in ML (63.5\% success rate).
+        \item Key drivers: Readability, empirical focus, author engagement, hyperparameters.
+        \item No evidence of a recent reproducibility crisis; issues persistent since 1984.
+        \item Future work: Multi-reproducer studies, standardized features, survival analysis.
+    \end{itemize}
+\end{frame}
+
+% Thank You slide
+\begin{frame}{Thank You}
+    \begin{center}
+        \Large Questions? \\
+        \vspace{0.5cm}
+        Contact: \href{mailto:raff_edward@bah.com}{raff_edward@bah.com} \\
+        Data: \url{https://github.com/EdwardRaff/Quantifying-Independently-Reproducible-ML}
+    \end{center}
+\end{frame}
+
+\end{document}
