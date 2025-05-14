@@ -10,3 +10,16 @@ week2/Zeyu/models/*
 week2/Yongcheng/laplace_redux_exp/data/**/*
 week2/Yongcheng/laplace_redux_exp/models/*
 !week2/Zeyu/models/.gitkeep
+
+# Ignore all files in models/
+models/*
+
+# Ignore all files in data/ but keep folders and .gitkeep
+/data/*
+!/data/**/
+!/data/**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
