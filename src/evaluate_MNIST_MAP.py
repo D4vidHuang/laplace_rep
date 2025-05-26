@@ -2,13 +2,14 @@ import argparse
 
 import torch
 import numpy as np
-from utils.datasets import get_mnist
+from utils.datasets import get_mnist, get_ood_mnist
 from utils.models import MLP, LeNet
-from utils.metrics import evaluate, evaluate_la, fpr95
+from utils.metrics import evaluate, evaluate_la
 from laplace import Laplace
 from sklearn.metrics import roc_auc_score
 
-def run_evaluation(model_name='lenet', mode='map', batch_size=128):
+
+def run_evaluation(model_name='lenet', mode='map', ood_dataset='emnist', batch_size=128):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = MLP() if model_name == 'mlp' else LeNet()
@@ -37,7 +38,7 @@ def run_evaluation(model_name='lenet', mode='map', batch_size=128):
     _, test_loader = get_mnist(batch_size=batch_size)
     
     # 评估模型在MNIST上的性能
-    acc, conf, scores, targets, preds, labels, _ = eval_func(eval_model, test_loader, ood=False)
+    acc, conf, scores, targets, preds, labels = eval_func(eval_model, test_loader, ood=False)
     
     # 创建二分类问题来计算AUROC
     # 将预测正确的样本标记为正类，预测错误的样本标记为负类
@@ -46,17 +47,28 @@ def run_evaluation(model_name='lenet', mode='map', batch_size=128):
     
     # 计算AUROC
     auroc = roc_auc_score(binary_targets, binary_scores)
-    
-    return acc, conf, auroc
+
+    # OOD数据评估
+    ood_loader = get_ood_mnist(ood_dataset, batch_size=batch_size)
+    ood_acc, ood_conf, ood_scores, ood_targets, _, _ = eval_func(eval_model, ood_loader, ood=True)
+
+    # OOD检测 AUROC
+    all_scores = np.concatenate([scores, ood_scores])
+    all_targets = np.concatenate([targets, ood_targets])
+    ood_auroc = roc_auc_score(all_targets, all_scores)
+
+    return acc, conf, auroc, ood_acc, ood_conf, ood_auroc
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', choices=['mlp', 'lenet'], default='lenet')
     parser.add_argument('--mode', choices=['map', 'la', 'la_star'], default='map')
+    parser.add_argument('--ood', choices=['emnist', 'fmnist', 'kmnist'], default='emnist')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size for evaluation')
     args = parser.parse_args()
 
-    acc, conf, auroc = run_evaluation(args.model, args.mode, args.batch_size)
-    
+    acc, conf, auroc, ood_acc, ood_conf, ood_auroc = run_evaluation(args.model, args.mode, args.ood, args.batch_size)
+
     print(f"[{args.mode.upper()}] Accuracy: {acc * 100:.2f}%, Confidence: {conf:.4f}, AUROC: {auroc:.4f}")
+    print(f"[{args.mode.upper()}] OOD Dataset: {args.ood.upper()}, Accuracy: {ood_acc * 100:.2f}%, Confidence: {ood_conf:.4f}, AUROC: {ood_auroc:.4f}")
  

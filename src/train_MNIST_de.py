@@ -80,7 +80,7 @@ if __name__ == '__main__':
     
     batch_size = 128
     epochs = 5
-    initial_lr = 0.1
+    initial_lr = 1e-3
     weight_decay = 5e-4
     
     train_loader, test_loader = get_mnist(batch_size=batch_size)

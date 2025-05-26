@@ -1,103 +1,98 @@
-import argparse
+import os
 import torch
 import numpy as np
-from utils.datasets import get_mnist
-from utils.models import MLP, LeNet
-from utils.metrics import evaluate, evaluate_la
-from laplace import Laplace
+import argparse
 from sklearn.metrics import roc_auc_score
 
-def evaluate_ensemble(models, test_loader, eval_func=evaluate):
-    """评估集成模型的性能"""
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    all_scores = []
-    all_preds = []
-    
-    # 收集每个模型的预测
-    for model in models:
-        acc, conf, scores, targets, preds, labels, _ = eval_func(model, test_loader, ood=False)
-        all_scores.append(scores)
-        all_preds.append(preds)
-    
-    # 将所有模型的预测转换为numpy数组
-    all_scores = np.stack(all_scores, axis=0)  # (n_models, n_samples)
-    all_preds = np.stack(all_preds, axis=0)    # (n_models, n_samples)
-    
-    # 计算集成预测
-    mean_scores = np.mean(all_scores, axis=0)  # (n_samples,)
-    # 使用投票方式获取最终预测
-    ensemble_preds = np.apply_along_axis(
-        lambda x: np.bincount(x).argmax(), 
-        axis=0, 
-        arr=all_preds
-    )
-    
-    # 计算准确率
-    correct = (ensemble_preds == labels.cpu().numpy()).sum()
-    total = len(labels)
-    accuracy = correct / total
-    
-    # 计算平均置信度
-    confidence = np.mean(mean_scores)
-    
-    # 计算AUROC
-    binary_targets = (ensemble_preds == labels.cpu().numpy()).astype(int)
-    auroc = roc_auc_score(binary_targets, mean_scores)
-    
-    return accuracy, confidence, auroc
+from utils.datasets import get_mnist, get_ood_mnist
+from utils.models import LeNet, MLP
 
-def run_evaluation(model_name='lenet', mode='map', num_models=5, batch_size=128):
-    """运行评估流程"""
+
+def evaluate_de(models, loader, ood=False):
+    """
+    和 metrics.evaluate 相似，
+    但预测时用模型列表做 softmax 平均。
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    _, test_loader = get_mnist(batch_size=batch_size)
-    
+    for m in models:
+        m.eval()
+        m.to(device)
+
+    all_probs, all_preds, all_labels = [], [], []
+    correct = total = 0
+
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            # stack 每个模型的 softmax 概率
+            probs_stack = torch.stack([m(x).softmax(1) for m in models], dim=0)
+            probs = probs_stack.mean(0)
+            preds = probs.argmax(1)
+
+            all_probs.append(probs)
+            all_preds.append(preds)
+            all_labels.append(y)
+
+            correct += (preds == y).sum().item()
+            total += y.size(0)
+
+    probs = torch.cat(all_probs)
+    preds = torch.cat(all_preds)
+    labels = torch.cat(all_labels)
+
+    acc = correct / total
+    conf = probs.max(1).values.mean().item()
+    scores = probs.max(1).values.cpu().numpy()
+    # targets: ID→1, OOD→0，与 metrics.evaluate 保持一致
+    targets = [0] * len(scores) if ood else [1] * len(scores)
+
+    return acc, conf, scores, targets, preds, labels
+
+
+def run_evaluation(model_name, ood_dataset, batch_size):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # 1) 加载 5 个独立训练好的 MAP 模型
+    model_cls = MLP if model_name == 'mlp' else LeNet
+    model_paths = [os.path.join('models', f'MNIST_de_model_{i + 1}.pt') for i in range(5)]
     models = []
-    for i in range(num_models):
-        if mode == 'map':
-            # 加载MAP模型
-            model = MLP() if model_name == 'mlp' else LeNet()
-            model_path = f'models/MNIST_de_model_{i+1}.pt'
-            model.load_state_dict(torch.load(model_path, map_location=device))
-            model.to(device)
-            models.append(model)
-            eval_func = evaluate
-        else:  # la or la_star
-            # 加载MAP模型
-            model = MLP() if model_name == 'mlp' else LeNet()
-            model_path = f'models/MNIST_de_model_{i+1}.pt'
-            model.load_state_dict(torch.load(model_path, map_location=device))
-            model.to(device)
-            
-            # 创建并加载LA模型
-            hessian = 'kron' if mode == 'la' else 'full'
-            la = Laplace(model,
-                        likelihood='classification',
-                        subset_of_weights='last_layer',
-                        hessian_structure=hessian)
-            la_path = f'models/MNIST_de_{mode}_model_{i+1}.pt'
-            la.load_state_dict(torch.load(la_path, map_location=device))
-            models.append(la)
-            eval_func = evaluate_la
-    
-    # 评估整个集成
-    acc, conf, auroc = evaluate_ensemble(models, test_loader, eval_func)
-    return acc, conf, auroc
+    for p in model_paths:
+        m = model_cls().to(device)
+        m.load_state_dict(torch.load(p, map_location=device))
+        models.append(m)
+
+    # 2) ID 上评估
+    _, test_loader = get_mnist(batch_size=batch_size)
+    acc_id, conf_id, scores_id, targets_id, preds_id, labels_id = evaluate_de(models, test_loader, ood=False)
+
+    # 分类准确率 vs 错误 的 AUROC（可选，可印证 ensemble 效果）
+    binary_targets = (preds_id == labels_id).cpu().numpy().astype(int)
+    binary_scores = scores_id
+    cls_auroc = roc_auc_score(binary_targets, binary_scores)
+
+    # 3) OOD 上评估
+    ood_loader = get_ood_mnist(ood_dataset, batch_size=batch_size)
+    acc_ood, conf_ood, scores_ood, targets_ood, *_ = evaluate_de(models, ood_loader, ood=True)
+
+    # OOD 检测 AUROC：ID (1) vs OOD (0)
+    all_scores = np.concatenate([scores_id, scores_ood])
+    all_targets = np.concatenate([targets_id, targets_ood])
+    ood_auroc = roc_auc_score(all_targets, all_scores)
+
+    return acc_id, conf_id, cls_auroc, acc_ood, conf_ood, ood_auroc
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', choices=['mlp', 'lenet'], default='lenet')
-    parser.add_argument('--mode', choices=['map', 'la', 'la_star'], default='map')
-    parser.add_argument('--num_models', type=int, default=5,
-                        help='Number of models in the ensemble')
-    parser.add_argument('--batch_size', type=int, default=128,
-                        help='batch size for evaluation')
+    parser.add_argument('--ood', choices=['emnist', 'fmnist', 'kmnist'], default='emnist')
+    parser.add_argument('--batch_size', type=int, default=128)
     args = parser.parse_args()
 
-    acc, conf, auroc = run_evaluation(
-        args.model, args.mode, args.num_models, args.batch_size
-    )
-    
-    print(f"\nDeep Ensemble [{args.mode.upper()}] Evaluation Results:")
-    print(f"Accuracy: {acc * 100:.2f}%")
-    print(f"Average Confidence: {conf:.4f}")
-    print(f"AUROC: {auroc:.4f}") 
+    acc, conf, cls_auroc, ood_acc, ood_conf, ood_auroc = \
+        run_evaluation(args.model, args.ood, args.batch_size)
+
+    print(f"[DE] ID Accuracy: {acc * 100:.2f}%, Confidence: {conf:.4f}, "
+          f"AUROC: {cls_auroc:.4f}")
+    print(f"[DE] OOD={args.ood.upper()} Accuracy: {ood_acc * 100:.2f}%, "
+          f"Confidence: {ood_conf:.4f}, AUROC: {ood_auroc:.4f}")

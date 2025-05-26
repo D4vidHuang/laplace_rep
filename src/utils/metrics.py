@@ -9,7 +9,9 @@ def evaluate(model, loader, ood=False):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
-    all_probs, all_preds, all_labels, all_imgs = [], [], [], []
+    all_probs, all_preds, all_labels = [], [], []
+    #all_imgs = []
+
     correct, total = 0, 0
     with torch.no_grad():
         for x, y in loader:
@@ -20,20 +22,20 @@ def evaluate(model, loader, ood=False):
             all_probs.append(probs)
             all_preds.append(preds)
             all_labels.append(y)
-            all_imgs.append(x.cpu())
+            #all_imgs.append(x.cpu())
             correct += (preds == y).sum().item()
             total += y.size(0)
 
     probs = torch.cat(all_probs)
     preds = torch.cat(all_preds)
     labels = torch.cat(all_labels)
-    imgs = torch.cat(all_imgs)
+    #imgs = torch.cat(all_imgs)
 
     acc = correct / total
     conf = probs.max(dim=1).values.mean().item()
     scores = probs.max(dim=1).values.cpu().numpy()
     targets = [0] * len(scores) if ood else [1] * len(scores)
-    return acc, conf, scores, targets, preds, labels, imgs
+    return acc, conf, scores, targets, preds, labels#, imgs
 
 
 def fpr95(y_true, y_score):
@@ -47,7 +49,9 @@ def fpr95(y_true, y_score):
 def evaluate_la(la_model, loader, ood=False):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    all_probs, all_preds, all_labels, all_imgs = [], [], [], []
+    all_probs, all_preds, all_labels = [], [], []
+    #all_imgs = []
+
     correct, total = 0, 0
 
     with torch.no_grad():
@@ -59,7 +63,7 @@ def evaluate_la(la_model, loader, ood=False):
             all_probs.append(probs)
             all_preds.append(preds)
             all_labels.append(y)
-            all_imgs.append(x.cpu())
+            #all_imgs.append(x.cpu())
 
             correct += (preds==y).sum().item()
             total += y.size(0)
@@ -67,14 +71,14 @@ def evaluate_la(la_model, loader, ood=False):
     probs = torch.cat(all_probs)
     preds = torch.cat(all_preds)
     labels = torch.cat(all_labels)
-    imgs = torch.cat(all_imgs)
+    #imgs = torch.cat(all_imgs)
 
     acc = correct / total
     conf = probs.max(dim=1).values.mean().item()
     scores = probs.max(dim=1).values.cpu().numpy()
     targets = [0] * len(scores) if ood else [1] * len(scores)
 
-    return acc, conf, scores, targets, preds, labels, imgs
+    return acc, conf, scores, targets, preds, labels#, imgs
 
 
 def visualize(images, preds, labels, title="Images"):

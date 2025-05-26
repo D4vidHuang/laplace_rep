@@ -25,11 +25,11 @@ def get_ood_mnist(name, batch_size=128):
     name = name.lower()
 
     if name == 'emnist':
-        dataset = datasets.EMNIST(MNIST_pth, split='letters', train=False, transform=transform, download=False)
+        dataset = datasets.EMNIST(MNIST_pth, split='letters', train=False, transform=transform, download=True)
     elif name == 'fmnist':
-        dataset = datasets.FashionMNIST(MNIST_pth, train=False, transform=transform, download=False)
+        dataset = datasets.FashionMNIST(MNIST_pth, train=False, transform=transform, download=True)
     elif name == 'kmnist':
-        dataset = datasets.KMNIST(MNIST_pth, train=False, transform=transform, download=False)
+        dataset = datasets.KMNIST(MNIST_pth, train=False, transform=transform, download=True)
     else:
         raise ValueError(f"Unknown dataset: '{name}'. Choose from: emnist, fmnist, kmnist")
 
