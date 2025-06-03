@@ -1,6 +1,16 @@
+from random import random
+
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-import torch
+import torch, random, numpy as np
+
+def set_seed(seed: int = 111):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 class MLP(nn.Module):
     def __init__(self, input_size=784, hidden_size=256, num_classes=10):

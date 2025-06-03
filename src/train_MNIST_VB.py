@@ -109,7 +109,7 @@ def train(model, train_loader, epochs=100, lr=0.001, kl_factor=0.1):
     
     return model
 
-def evaluate(model, test_loader, num_samples=30):
+def evaluate(model, test_loader, num_samples=15):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     model.eval()
@@ -139,7 +139,7 @@ def evaluate(model, test_loader, num_samples=30):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--kl_factor', type=float, default=0.1)
     args = parser.parse_args()

@@ -13,11 +13,13 @@ week2/Yongcheng/laplace_redux_exp/models/*
 
 # Ignore all files in models/
 models/*
+/src/models/*
 
 # Ignore all files in data/ but keep folders and .gitkeep
 /data/*
 !/data/**/
 !/data/**/.gitkeep
+/src/data/*
 
 # Python
 __pycache__/

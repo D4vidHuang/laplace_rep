@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import argparse
 import numpy as np
 from utils.datasets import load_MNIST, get_ood_mnist
-from utils.models import LeNet, SWAG
+from utils.models import LeNet, SWAG, set_seed
 from utils.metrics import accuracy, calibration_error
 from sklearn.metrics import roc_auc_score
 import time
@@ -46,6 +46,7 @@ def evaluate_swag(args):
     start_time = time.time()
     
     with torch.no_grad():
+        adjust_bn(swag_model, test_loader, device)
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             
@@ -56,7 +57,7 @@ def evaluate_swag(args):
                 swag_model.sample()
                 
                 # Update batch normalization statistics
-                adjust_bn(swag_model, test_loader, device)
+                #adjust_bn(swag_model, test_loader, device)
                 
                 # Make prediction
                 swag_model.eval()
@@ -117,6 +118,7 @@ def evaluate_swag(args):
         ood_confidences = []
         
         with torch.no_grad():
+            #adjust_bn(swag_model, test_loader, device)
             for data, _ in ood_loader:
                 data = data.to(device)
                 
@@ -162,6 +164,8 @@ if __name__ == '__main__':
                         help='path to saved SWAG model')
     parser.add_argument('--ood-dataset', type=str, choices=['emnist', 'fmnist', 'kmnist'],
                         help='OOD dataset to evaluate on (optional)')
-    
+    parser.add_argument('--seed', type=int, default=111, help='random seed')
     args = parser.parse_args()
-    evaluate_swag(args) 
+    set_seed(args.seed)
+
+    evaluate_swag(args)

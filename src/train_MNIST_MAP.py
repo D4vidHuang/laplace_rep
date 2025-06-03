@@ -3,9 +3,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from utils.datasets import get_mnist
-from utils.models import MLP, LeNet
+from utils.models import MLP, LeNet, set_seed
 import os
 import math
+
 
 def cosine_annealing_lr(epoch, total_epochs, initial_lr):
     """余弦退火学习率调度"""
@@ -51,6 +52,12 @@ def train(model, dataloader, epochs=100, initial_lr=0.1, weight_decay=5e-4):
 
 if __name__ == '__main__':
     # 使用LeNet架构，符合论文描述
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', type=int, default=111, help='random seed')
+    args = parser.parse_args()
+    set_seed(args.seed)
+
     model_name = 'lenet'
     save_dir = 'models'
     save_file = 'MNIST_map.pt'

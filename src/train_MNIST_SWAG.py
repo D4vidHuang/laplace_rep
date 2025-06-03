@@ -6,7 +6,7 @@ import argparse
 import os
 import time
 from utils.datasets import load_MNIST
-from utils.models import LeNet, SWAG
+from utils.models import LeNet, SWAG, set_seed
 from utils.metrics import accuracy
 
 def adjust_bn(model, loader, device):
@@ -110,6 +110,9 @@ if __name__ == '__main__':
                         help='path to pretrained model')
     parser.add_argument('--log-interval', type=int, default=10,
                         help='how many batches to wait before logging training status')
-    
+    parser.add_argument('--seed', type=int, default=111,
+                        help='random seed')
     args = parser.parse_args()
-    train_swag(args) 
+    set_seed(args.seed)
+
+    train_swag(args)

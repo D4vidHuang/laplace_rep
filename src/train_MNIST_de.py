@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from utils.datasets import get_mnist
-from utils.models import MLP, LeNet
+from utils.models import MLP, LeNet, set_seed
 import os
 import math
 
@@ -71,6 +71,11 @@ def evaluate_ensemble(models, test_loader):
     return 100 * correct / total
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', type=int, default=111, help='random seed')
+    args = parser.parse_args()
+    set_seed(args.seed)
     # 配置参数
     model_name = 'lenet'
     save_dir = 'models'
@@ -89,6 +94,7 @@ if __name__ == '__main__':
     models = []
     for i in range(num_models):
         print(f"\nTraining model {i+1}/{num_models}")
+        set_seed(args.seed + i + 1)
         model = LeNet()  # 每次创建新的模型实例
         model = train_single_model(model, train_loader, epochs=epochs, 
                                  initial_lr=initial_lr, weight_decay=weight_decay)
