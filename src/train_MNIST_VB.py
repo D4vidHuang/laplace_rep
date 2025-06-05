@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from utils.datasets import get_mnist
+from utils.models import set_seed
 import os
 import argparse
 from bayesian_torch.layers import Conv2dFlipout, LinearFlipout
@@ -142,7 +143,9 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--kl_factor', type=float, default=0.1)
+    parser.add_argument('--seed', type=int, default=111)
     args = parser.parse_args()
+    set_seed(args.seed)
     
     # 创建保存目录
     save_dir = 'models'

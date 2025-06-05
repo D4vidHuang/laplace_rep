@@ -1,8 +1,11 @@
 import torch
 from laplace import Laplace
+from laplace.curvature import BackPackGGN, BackPackEF
 from utils.models import MLP, LeNet
 from utils.datasets import get_mnist
 import os
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
 
 def apply_la(model_name='mlp', la_type='la'):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -16,15 +19,18 @@ def apply_la(model_name='mlp', la_type='la'):
 
     if la_type == 'la':
         hessian = 'kron'
+        backend = BackPackGGN
     elif la_type == 'la_star':
         hessian = 'full'
+        backend = BackPackEF
     else:
         raise ValueError("la_type must be 'la' or 'la_star'")
 
     la = Laplace(model=model,
                  likelihood='classification',
                  subset_of_weights='last_layer',
-                 hessian_structure=hessian)
+                 hessian_structure=hessian,
+                 backend=backend)
     la.fit(train_loader)
     la.optimize_prior_precision(method='marglik')
     

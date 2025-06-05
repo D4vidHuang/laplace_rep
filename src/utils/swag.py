@@ -1,0 +1,321 @@
+import copy
+import numpy as np
+from tqdm import tqdm
+import itertools
+import torch
+import torch.nn.functional as F
+
+
+def flatten(lst):
+    tmp = [i.contiguous().view(-1, 1) for i in lst]
+    return torch.cat(tmp).view(-1)
+
+
+def unflatten_like(vector, likeTensorList):
+    # Takes a flat torch.tensor and unflattens it to a list of torch.tensors
+    #    shaped like likeTensorList
+    outList = []
+    i = 0
+    for tensor in likeTensorList:
+        # n = module._parameters[name].numel()
+        n = tensor.numel()
+        outList.append(vector[:, i: i + n].view(tensor.shape))
+        i += n
+    return outList
+
+
+def _check_bn(module, flag):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        flag[0] = True
+
+
+def check_bn(model):
+    flag = [False]
+    model.apply(lambda module: _check_bn(module, flag))
+    return flag[0]
+
+
+def reset_bn(module):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        module.running_mean = torch.zeros_like(module.running_mean)
+        module.running_var = torch.ones_like(module.running_var)
+
+
+def _get_momenta(module, momenta):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        momenta[module] = module.momentum
+
+
+def _set_momenta(module, momenta):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        module.momentum = momenta[module]
+
+
+def bn_update(loader, model, verbose=False, subset=None, **kwargs):
+    """
+        BatchNorm buffers update (if any).
+        Performs 1 epochs to estimate buffers average using train dataset.
+        :param loader: train dataset loader for buffers average estimation.
+        :param model: model being update
+        :return: None
+    """
+    if not check_bn(model):
+        return
+    model.train()
+    momenta = {}
+    model.apply(reset_bn)
+    model.apply(lambda module: _get_momenta(module, momenta))
+    n = 0
+    num_batches = len(loader)
+
+    with torch.no_grad():
+        if subset is not None:
+            loader = itertools.islice(loader, int(subset * len(loader)))
+
+        if verbose:
+            loader = tqdm(loader, total=num_batches)
+
+        for input, _ in loader:
+            input = input.cuda(non_blocking=True)
+            input_var = torch.autograd.Variable(input)
+            b = input_var.data.size(0)
+
+            momentum = b / (n + b)
+            for module in momenta.keys():
+                module.momentum = momentum
+
+            model(input_var, **kwargs)
+            n += b
+
+    apply_bn_update(model, momenta)
+    return momenta
+
+
+def apply_bn_update(model, momenta):
+    model.apply(lambda module: _set_momenta(module, momenta))
+
+
+def fit_swag(model, device, train_loader, loss_func, diag_only=True, max_num_models=20, swa_c_epochs=1, swa_c_batches=None, swa_lr=0.01, momentum=0.9, wd=3e-4, mask=None, parallel=False):
+    """
+    Fit SWAG model
+    (adapted from https://github.com/wjmaddox/swa_gaussian/blob/master/experiments/train/run_swag.py)
+
+    Args:
+        diag_only: bool flag to only store diagonal of SWAG covariance matrix (Default: True)
+        max_num_models: int for maximum number of SWAG models to save (Default: 20)
+        swa_c_epochs: int for SWA model collection frequency/cycle length in epochs (Default: 1)
+        swa_c_batches: int for SWA model collection frequency/cycle length in batches (Default: None)
+        swa_lr: float for SWA learning rate; use 0.05 for CIFAR100 and 0.01 otherwise (Default: 0.01)
+        momentum: float for SGD momentum (Default: 0.9)
+        wd: float for weight decay (Default: 3e-4)
+        mask: dict of subnetwork masks (Default: None)
+        parallel: data parallel model switch (default: False)
+    """
+
+    if swa_c_epochs is not None and swa_c_batches is not None:
+        raise RuntimeError("One of swa_c_epochs or swa_c_batches must be None!")
+
+    if parallel:
+        print("Using Data Parallel model")
+        model = torch.nn.DataParallel(model).cuda(device)
+
+    swag_model = SWAG(copy.deepcopy(model), no_cov_mat=diag_only, max_num_models=max_num_models, mask=mask).to(device)
+    optimizer = torch.optim.SGD(model.parameters(), lr=swa_lr, momentum=momentum, weight_decay=wd)
+
+    print("Running SWAG...")
+    model.train()
+    if swa_c_epochs is not None:
+        n_epochs = swa_c_epochs * max_num_models
+    else:
+        n_epochs = 1 + (max_num_models * swa_c_batches) // len(train_loader)
+    for epoch in tqdm(range(int(n_epochs))):
+        for batch_idx, (inputs, targets) in tqdm(enumerate(train_loader)):
+            inputs = inputs.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
+            loss = loss_func(model(inputs), targets)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            if swa_c_batches is not None and (batch_idx+1) % swa_c_batches == 0:
+                swag_model.collect_model(model)
+                if swag_model.n_models == max_num_models:
+                    break
+
+        if swa_c_epochs is not None and epoch % swa_c_epochs == 0:
+            swag_model.collect_model(model)
+
+    return swag_model
+
+
+def fit_swag_and_precompute_bn_params(model, device, train_loader, max_num_models, swa_lr, swa_c_epochs, swa_c_batches, parallel, n_samples, bn_update_subset):
+    """ fit SWAG model on training data and pre-compute SWAG weight samples and corresponding BatchNorm parameters """
+
+    # fit SWAG model on training data
+    nll_fun = torch.nn.CrossEntropyLoss(reduction='mean')
+    swag_model = fit_swag(copy.deepcopy(model), device, train_loader, nll_fun,
+                    diag_only=False, max_num_models=max_num_models,
+                    swa_lr=swa_lr, swa_c_epochs=swa_c_epochs,
+                    swa_c_batches=swa_c_batches, parallel=parallel)
+    swag_model.base = swag_model.base.to(device)
+
+    # pre-compute SWAG weight samples and corresponding BatchNorm parameters for every component
+    swag_samples = [swag_model.sample() for _ in range(n_samples)]
+    swag_bn_params = []
+    for i, sample in enumerate(swag_samples):
+        print(f"Computing BatchNorm statistics for SWAG sample #{i+1}...")
+        swag_model.set_model_parameters(sample)
+        swag_bn_params.append(bn_update(train_loader, swag_model, verbose=True, subset=bn_update_subset))
+    
+    return swag_model, swag_samples, swag_bn_params
+
+
+def predict_swag(swag_model, x, swag_samples, swag_bn_params):
+    """ Make predictions with SWAG on a single data batch (x, y) """
+
+    swag_model.eval()
+    swag_model.base.eval()
+
+    out = 0.
+    for sample, bn_param in zip(swag_samples, swag_bn_params):
+        # set sampled model weights and update BatchNorm statistics
+        swag_model.set_model_parameters(sample)
+        apply_bn_update(swag_model, bn_param)
+        f_s = swag_model(x).detach()
+        out += torch.softmax(f_s, dim=1)
+    out /= len(swag_samples)
+
+    return out
+
+
+class SWAG(torch.nn.Module):
+    def __init__(self, base, no_cov_mat=True, max_num_models=0, var_clamp=1e-30, mask=None):
+        super(SWAG, self).__init__()
+
+        self.register_buffer("n_models", torch.zeros([1], dtype=torch.long))
+        self.params = list()
+
+        self.no_cov_mat = no_cov_mat
+        self.max_num_models = max_num_models
+
+        self.var_clamp = var_clamp
+        self.mask = mask
+
+        self.base = base
+        self.init_swag_parameters(params=self.params, no_cov_mat=self.no_cov_mat, mask=self.mask)
+        #self.base.apply(lambda module: swag_parameters(module=module, params=self.params, no_cov_mat=self.no_cov_mat, only_nonzero=self.only_nonzero))
+
+    def forward(self, *args, **kwargs):
+        return self.base(*args, **kwargs)
+
+    def init_swag_parameters(self, params, no_cov_mat=True, mask=None):
+        for mod_name, module in self.base.named_modules():
+            for name in list(module._parameters.keys()):
+                if module._parameters[name] is None:
+                    continue
+
+                name_full = f"{mod_name}.{name}".replace(".", "-")
+                data = module._parameters[name].data
+                module._parameters.pop(name)
+                module.register_buffer("%s_mean" % name_full, data.new(data.size()).zero_())
+                module.register_buffer("%s_sq_mean" % name_full, data.new(data.size()).zero_())
+
+                if no_cov_mat is False:
+                    if mask and name_full.replace("-", ".") in mask:
+                        data = data[mask[name_full.replace("-", ".")].nonzero(as_tuple=True)]
+                    module.register_buffer("%s_cov_mat_sqrt" % name_full, data.new_empty((0, data.numel())).zero_())
+
+                params.append((module, name_full))
+
+    def sample(self, scale=0.5, cov=True, seed=None):
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        mean_list = []
+        sq_mean_list = []
+        if cov:
+            cov_mat_sqrt_list = []
+
+        for (module, name) in self.params:
+            mean_list.append(module.__getattr__("%s_mean" % name).cpu())
+            sq_mean_list.append(module.__getattr__("%s_sq_mean" % name).cpu())
+            if cov:
+                cov_mat_sqrt_list.append(module.__getattr__("%s_cov_mat_sqrt" % name).cpu())
+
+        mean = flatten(mean_list)
+        sq_mean = flatten(sq_mean_list)
+
+        # draw diagonal variance sample
+        var = torch.clamp(sq_mean - mean ** 2, self.var_clamp)
+        rand_sample = var.sqrt() * torch.randn_like(var, requires_grad=False)
+
+        # if covariance draw low rank sample
+        if cov:
+            cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1)
+            eps = cov_mat_sqrt.new_empty((cov_mat_sqrt.size(0),), requires_grad=False).normal_()
+            cov_sample = cov_mat_sqrt.t().matmul(eps)
+            cov_sample /= (self.max_num_models - 1) ** 0.5
+            rand_sample += cov_sample
+
+        # update sample with mean and scale
+        sample = (mean + scale**0.5 * rand_sample).unsqueeze(0)
+
+        # unflatten new sample like the mean sample
+        samples_list = unflatten_like(sample, mean_list)
+        self.set_model_parameters(samples_list)
+
+        return samples_list
+
+    def set_model_parameters(self, parameter_list):
+        for (module, name), param in zip(self.params, parameter_list):
+            module.__setattr__(name.split("-")[-1], param.cuda())
+
+    def collect_model(self, base_model):
+        for (module, name), base_param in zip(self.params, base_model.parameters()):
+            data = base_param.data
+
+            mean = module.__getattr__("%s_mean" % name)
+            sq_mean = module.__getattr__("%s_sq_mean" % name)
+
+            # first moment
+            mean = mean * self.n_models.item() / (
+                self.n_models.item() + 1.0
+            ) + data / (self.n_models.item() + 1.0)
+
+            # second moment
+            sq_mean = sq_mean * self.n_models.item() / (
+                self.n_models.item() + 1.0
+            ) + data ** 2 / (self.n_models.item() + 1.0)
+
+            # square root of covariance matrix
+            if self.no_cov_mat is False:
+                cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
+
+                # block covariance matrices, store deviation from current mean
+                dev = (data - mean)
+                name_full = name.replace("-", ".")
+                if self.mask and name_full in self.mask:
+                    dev = dev[self.mask[name_full].nonzero(as_tuple=True)]
+                cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.view(-1, 1).t()), dim=0)
+
+                # remove first column if we have stored too many models
+                if (self.n_models.item() + 1) > self.max_num_models:
+                    cov_mat_sqrt = cov_mat_sqrt[1:, :]
+                module.__setattr__("%s_cov_mat_sqrt" % name, cov_mat_sqrt)
+
+            module.__setattr__("%s_mean" % name, mean)
+            module.__setattr__("%s_sq_mean" % name, sq_mean)
+        self.n_models.add_(1)
+
+    def load_state_dict(self, state_dict, strict=False):
+        if not self.no_cov_mat:
+            n_models = state_dict["n_models"].item()
+            rank = min(n_models, self.max_num_models)
+            for module, name in self.params:
+                mean = module.__getattr__("%s_mean" % name)
+                module.__setattr__(
+                    "%s_cov_mat_sqrt" % name,
+                    mean.new_empty((rank, mean.numel())).zero_(),
+                )
+        super(SWAG, self).load_state_dict(state_dict, strict)

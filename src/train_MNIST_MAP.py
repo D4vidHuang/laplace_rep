@@ -68,7 +68,7 @@ if __name__ == '__main__':
    
     batch_size = 128
     # 这里我按照它设置的，但是我觉得不对，我先改5个epoch把后面的做了
-    epochs = 5
+    epochs = 100
     initial_lr = 1e-3
     weight_decay = 5e-4
     

@@ -95,4 +95,4 @@ if __name__ == '__main__':
     print(f"[DE] ID Accuracy: {acc * 100:.2f}%, Confidence: {conf:.4f}, "
           f"AUROC: {cls_auroc:.4f}")
     print(f"[DE] OOD={args.ood.upper()} Accuracy: {ood_acc * 100:.2f}%, "
-          f"Confidence: {ood_conf:.4f}, AUROC: {ood_auroc:.4f}")
+          f"Confidence: {ood_conf*100:.3f}, AUROC: {ood_auroc*100:.3f}")
