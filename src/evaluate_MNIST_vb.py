@@ -73,5 +73,5 @@ if __name__ == '__main__':
         ood_auroc = roc_auc_score(labels, scores)
         ood_mean_conf = ood_conf.mean()
 
-        print(f"[VB] OOD={args.ood.upper()} | OOD-conf: {ood_mean_conf:.4f} | "
-              f"OOD-AUROC: {ood_auroc:.4f}")
+        print(f"[VB] OOD={args.ood.upper()} | OOD-conf: {ood_mean_conf*100:.3f} | "
+              f"OOD-AUROC: {ood_auroc*100:.3f}")
