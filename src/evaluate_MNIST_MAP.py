@@ -73,6 +73,6 @@ if __name__ == '__main__':
 
     acc, conf, auroc, ood_acc, ood_conf, ood_auroc = run_evaluation(args.model, args.mode, args.ood, args.batch_size)
 
-    print(f"[{args.mode.upper()}] Accuracy: {acc * 100:.2f}%, Confidence: {conf*100:.3f}, AUROC: {auroc*100:.3f}")
-    print(f"[{args.mode.upper()}] OOD Dataset: {args.ood.upper()}, Accuracy: {ood_acc * 100:.2f}%, Confidence: {ood_conf*100:.3f}, AUROC: {ood_auroc*100:.3f}")
+    print(f"[{args.mode.upper()}] Accuracy: {acc * 100:.2f}% | Confidence: {conf*100:.3f} | AUROC: {auroc*100:.3f}")
+    print(f"[{args.mode.upper()}] OOD Dataset: {args.ood.upper()} | Accuracy: {ood_acc * 100:.2f}% | Confidence: {ood_conf*100:.3f} | AUROC: {ood_auroc*100:.3f}")
  

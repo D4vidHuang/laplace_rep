@@ -1,172 +1,139 @@
+import os
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from utils.datasets import get_mnist
-from utils.models import set_seed
-import os
-import argparse
-from bayesian_torch.layers import Conv2dFlipout, LinearFlipout
+from torch.cuda import amp
+from utils.datasets import load_MNIST
+from utils.models import LeNetVB, set_seed
 
-class BayesianLeNet(nn.Module):
-    def __init__(self, prior_mu=0, prior_sigma=1, posterior_mu_init=0, posterior_rho_init=-3):
-        super(BayesianLeNet, self).__init__()
-        
-        # 设置先验精度为5e-4（转换为标准差）
-        prior_sigma = (1.0 / (5e-4))**0.5
-        
-        # 第一个卷积层块
-        self.conv1 = Conv2dFlipout(
-            in_channels=1, out_channels=6, kernel_size=5,
-            prior_mean=prior_mu, prior_variance=prior_sigma**2,
-            posterior_mu_init=posterior_mu_init, posterior_rho_init=posterior_rho_init
-        )
-        self.act1 = nn.ReLU()
-        self.pool1 = nn.MaxPool2d(kernel_size=2)
-        
-        # 第二个卷积层块
-        self.conv2 = Conv2dFlipout(
-            in_channels=6, out_channels=16, kernel_size=5,
-            prior_mean=prior_mu, prior_variance=prior_sigma**2,
-            posterior_mu_init=posterior_mu_init, posterior_rho_init=posterior_rho_init
-        )
-        self.act2 = nn.ReLU()
-        self.pool2 = nn.MaxPool2d(kernel_size=2)
-        
-        # 全连接层
-        self.fc1 = LinearFlipout(
-            in_features=16*4*4, out_features=120,
-            prior_mean=prior_mu, prior_variance=prior_sigma**2,
-            posterior_mu_init=posterior_mu_init, posterior_rho_init=posterior_rho_init
-        )
-        self.act3 = nn.ReLU()
-        
-        self.fc2 = LinearFlipout(
-            in_features=120, out_features=84,
-            prior_mean=prior_mu, prior_variance=prior_sigma**2,
-            posterior_mu_init=posterior_mu_init, posterior_rho_init=posterior_rho_init
-        )
-        self.act4 = nn.ReLU()
-        
-        self.fc3 = LinearFlipout(
-            in_features=84, out_features=10,
-            prior_mean=prior_mu, prior_variance=prior_sigma**2,
-            posterior_mu_init=posterior_mu_init, posterior_rho_init=posterior_rho_init
-        )
 
-    def forward(self, x):
-        # Flipout层返回(output, kl)元组，我们只需要output
-        x = self.act1(self.conv1(x)[0])
-        x = self.pool1(x)
-        x = self.act2(self.conv2(x)[0])
-        x = self.pool2(x)
-        x = x.view(-1, 16*4*4)
-        x = self.act3(self.fc1(x)[0])
-        x = self.act4(self.fc2(x)[0])
-        x = self.fc3(x)[0]
-        return x
-
-def train(model, train_loader, epochs=100, lr=0.001, kl_factor=0.1):
+def train_vb(model, train_loader, epochs=100, lr=1e-3, tau=0.1):
+    """
+    Train LeNet-VB：
+     - 1 MC sample per batch to compute output & KL
+     - Loss = NLL + (tau / N) * KL
+     - Adam + CosineAnnealingLR
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     model.train()
-    
+
+    num_data = len(train_loader.dataset)
+
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss()
-    
+    # T_max = total iterations = epochs * num_batches
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                     T_max=epochs * len(train_loader),
+                                                     eta_min=0)
+
     for epoch in range(epochs):
-        total_loss = 0
-        correct = 0
+        running_loss = 0.0
+        running_acc = 0.0
         total = 0
-        
+
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
-            
-            # 前向传播
-            outputs = model(x)
-            
-            # 计算KL散度
-            kl = 0
-            for module in model.modules():
-                if hasattr(module, 'kl_loss'):
-                    kl = kl + module.kl_loss()
-            
-            # 计算总损失（NLL + KL）
-            nll = criterion(outputs, y)
-            loss = nll + kl_factor * kl
-            
+
+            with amp.autocast():
+                outputs, kl = model(x)
+                loss = F.cross_entropy(outputs.squeeze(), y) + tau / num_data*kl
+
             loss.backward()
             optimizer.step()
-            
-            total_loss += loss.item() * x.size(0)
-            _, predicted = torch.max(outputs.data, 1)
+            scheduler.step()
+
+            running_loss += loss.item() * x.size(0)
+            preds = outputs.detach().argmax(dim=1)
+            running_acc += (preds == y).sum().item()
             total += y.size(0)
-            correct += (predicted == y).sum().item()
-        
-        avg_loss = total_loss / total
-        accuracy = 100 * correct / total
-        print(f'Epoch [{epoch+1}/{epochs}], Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')
-    
+
+        epoch_loss = running_loss / total
+        epoch_acc = 100.0 * running_acc / total
+        print(f'Epoch [{epoch+1}/{epochs}]  '
+              f'Loss: {epoch_loss:.4f}  '
+              f'Accuracy: {epoch_acc:.2f}%')
+        print(f"[DEBUG] var0={model.conv1.prior_variance}, KL={kl.item():.4f}")
+
     return model
 
-def evaluate(model, test_loader, num_samples=15):
+
+def evaluate_vb(model, test_loader, n_samples=15):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     model.eval()
-    
-    correct = 0
-    total = 0
-    
+
+    import numpy as np
+    from sklearn.metrics import roc_auc_score
+
+    all_preds = []
+    all_conf = []
+    all_labels = []
+
     with torch.no_grad():
         for x, y in test_loader:
             x, y = x.to(device), y.to(device)
-            
-            # 多次采样预测
-            outputs = torch.zeros(num_samples, x.size(0), 10).to(device)
-            for i in range(num_samples):
-                outputs[i] = model(x)
-            
-            # 平均预测结果
-            mean_output = outputs.mean(dim=0)
-            _, predicted = torch.max(mean_output, 1)
-            
-            total += y.size(0)
-            correct += (predicted == y).sum().item()
-    
-    accuracy = 100 * correct / total
-    return accuracy
+
+            outputs_stack = torch.zeros(n_samples, x.size(0), 10, device=device)
+            for i in range(n_samples):
+                logits, _ = model(x)
+                probs = torch.softmax(logits, dim=1)
+                outputs_stack[i] = probs
+
+            mean_probs = outputs_stack.mean(dim=0)
+            conf, preds = mean_probs.max(dim=1)
+            all_preds.append(preds.cpu())
+            all_conf.append(conf.cpu())
+            all_labels.append(y.cpu())
+
+    all_preds = torch.cat(all_preds).numpy()
+    all_conf = torch.cat(all_conf).numpy()
+    all_labels = torch.cat(all_labels).numpy()
+
+    accuracy = 100.0 * (all_preds == all_labels).mean()
+    correctness = (all_preds == all_labels).astype(int)
+    auroc = roc_auc_score(correctness, all_conf)
+
+    avg_conf = all_conf.mean()
+
+    return accuracy, avg_conf, auroc
+
 
 if __name__ == '__main__':
+    import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--kl_factor', type=float, default=0.1)
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--tau', type=float, default=10,
+                        help='Tempering parameter τ for scaling KL by τ/N')
+    parser.add_argument('--n_samples', type=int, default=15)
     parser.add_argument('--seed', type=int, default=111)
     args = parser.parse_args()
+
     set_seed(args.seed)
-    
-    # 创建保存目录
+
     save_dir = 'models'
     os.makedirs(save_dir, exist_ok=True)
-    
-    # 加载数据
-    train_loader, test_loader = get_mnist(batch_size=args.batch_size)
-    
-    # 创建模型
-    model = BayesianLeNet()
-    
-    # 训练模型
-    print("Training Bayesian LeNet...")
-    model = train(model, train_loader, epochs=args.epochs, lr=args.lr, kl_factor=args.kl_factor)
-    
-    # 评估模型
-    print("\nEvaluating model...")
-    test_accuracy = evaluate(model, test_loader)
-    print(f"Test Accuracy: {test_accuracy:.2f}%")
-    
-    # 保存模型
-    save_path = os.path.join(save_dir, 'MNIST_vb.pt')
-    torch.save(model.state_dict(), save_path)
-    print(f"Model saved to {save_path}") 
+
+    train_loader, val_loader, test_loader = load_MNIST(batch_size=args.batch_size)
+
+    model = LeNetVB(num_classes=10, var0=1/33.0, estimator='flipout')
+
+    print("Starting VB training (LeNet-VB)...")
+    model = train_vb(model,
+                     train_loader,
+                     epochs=args.epochs,
+                     lr=args.lr,
+                     tau=args.tau)
+
+    print("\nEvaluating VB model...")
+    test_acc, test_conf, test_auroc = evaluate_vb(model, test_loader, n_samples=args.n_samples)
+    print(f"Test Accuracy: {test_acc:.2f}%, "
+          f"Avg Confidence: {test_conf:.4f}, "
+          f"AUROC: {test_auroc:.4f}")
+
+    torch.save(model.state_dict(), os.path.join(save_dir, 'MNIST_vb.pt'))
+    print(f"Model weights saved to {save_dir}/MNIST_vb.pt")

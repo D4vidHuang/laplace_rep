@@ -7,6 +7,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
 
+
 def apply_la(model_name='mlp', la_type='la'):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = MLP() if model_name == 'mlp' else LeNet()

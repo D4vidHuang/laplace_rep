@@ -95,24 +95,22 @@ def apply_bn_update(model, momenta):
     model.apply(lambda module: _set_momenta(module, momenta))
 
 
-def fit_swag(model, device, train_loader, loss_func, diag_only=True, max_num_models=20, swa_c_epochs=1, swa_c_batches=None, swa_lr=0.01, momentum=0.9, wd=3e-4, mask=None, parallel=False):
+def fit_swag(model, device, train_loader, loss_func, diag_only=True, max_num_models=20, swg_c_epochs=1, swg_c_batches=None, swg_lr=0.01, momentum=0.9, wd=3e-4, mask=None, parallel=False):
     """
     Fit SWAG model
-    (adapted from https://github.com/wjmaddox/swa_gaussian/blob/master/experiments/train/run_swag.py)
-
     Args:
-        diag_only: bool flag to only store diagonal of SWAG covariance matrix (Default: True)
-        max_num_models: int for maximum number of SWAG models to save (Default: 20)
-        swa_c_epochs: int for SWA model collection frequency/cycle length in epochs (Default: 1)
-        swa_c_batches: int for SWA model collection frequency/cycle length in batches (Default: None)
-        swa_lr: float for SWA learning rate; use 0.05 for CIFAR100 and 0.01 otherwise (Default: 0.01)
+        diag_only: bool flag to only store diagonal of SWG covariance matrix (Default: True)
+        max_num_models: int for maximum number of SWG models to save (Default: 20)
+        swg_c_epochs: int for SWG model collection frequency/cycle length in epochs (Default: 1)
+        swg_c_batches: int for SWG model collection frequency/cycle length in batches (Default: None)
+        swg_lr: float for SWG learning rate; use 0.002 for CIFAR10 and 0.01 otherwise (Default: 0.01)
         momentum: float for SGD momentum (Default: 0.9)
         wd: float for weight decay (Default: 3e-4)
         mask: dict of subnetwork masks (Default: None)
         parallel: data parallel model switch (default: False)
     """
 
-    if swa_c_epochs is not None and swa_c_batches is not None:
+    if swg_c_epochs is not None and swg_c_batches is not None:
         raise RuntimeError("One of swa_c_epochs or swa_c_batches must be None!")
 
     if parallel:
@@ -120,14 +118,14 @@ def fit_swag(model, device, train_loader, loss_func, diag_only=True, max_num_mod
         model = torch.nn.DataParallel(model).cuda(device)
 
     swag_model = SWAG(copy.deepcopy(model), no_cov_mat=diag_only, max_num_models=max_num_models, mask=mask).to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr=swa_lr, momentum=momentum, weight_decay=wd)
+    optimizer = torch.optim.SGD(model.parameters(), lr=swg_lr, momentum=momentum, weight_decay=wd)
 
     print("Running SWAG...")
     model.train()
-    if swa_c_epochs is not None:
-        n_epochs = swa_c_epochs * max_num_models
+    if swg_c_epochs is not None:
+        n_epochs = swg_c_epochs * max_num_models
     else:
-        n_epochs = 1 + (max_num_models * swa_c_batches) // len(train_loader)
+        n_epochs = 1 + (max_num_models * swg_c_batches) // len(train_loader)
     for epoch in tqdm(range(int(n_epochs))):
         for batch_idx, (inputs, targets) in tqdm(enumerate(train_loader)):
             inputs = inputs.to(device, non_blocking=True)
@@ -138,29 +136,29 @@ def fit_swag(model, device, train_loader, loss_func, diag_only=True, max_num_mod
             loss.backward()
             optimizer.step()
 
-            if swa_c_batches is not None and (batch_idx+1) % swa_c_batches == 0:
+            if swg_c_batches is not None and (batch_idx+1) % swg_c_batches == 0:
                 swag_model.collect_model(model)
                 if swag_model.n_models == max_num_models:
                     break
 
-        if swa_c_epochs is not None and epoch % swa_c_epochs == 0:
+        if swg_c_epochs is not None and epoch % swg_c_epochs == 0:
             swag_model.collect_model(model)
 
     return swag_model
 
 
-def fit_swag_and_precompute_bn_params(model, device, train_loader, max_num_models, swa_lr, swa_c_epochs, swa_c_batches, parallel, n_samples, bn_update_subset):
+def fit_swag_and_precompute_bn_params(model, device, train_loader, max_num_models, swg_lr, swg_c_epochs, swg_c_batches, parallel, n_samples, bn_update_subset):
     """ fit SWAG model on training data and pre-compute SWAG weight samples and corresponding BatchNorm parameters """
 
-    # fit SWAG model on training data
+    # fit SWAG on training data
     nll_fun = torch.nn.CrossEntropyLoss(reduction='mean')
     swag_model = fit_swag(copy.deepcopy(model), device, train_loader, nll_fun,
                     diag_only=False, max_num_models=max_num_models,
-                    swa_lr=swa_lr, swa_c_epochs=swa_c_epochs,
-                    swa_c_batches=swa_c_batches, parallel=parallel)
+                    swg_lr=swg_lr, swg_c_epochs=swg_c_epochs,
+                    swg_c_batches=swg_c_batches, parallel=parallel)
     swag_model.base = swag_model.base.to(device)
 
-    # pre-compute SWAG weight samples and corresponding BatchNorm parameters for every component
+    # pre-compute SWAG weight samples and corresponding BatchNorm parameters
     swag_samples = [swag_model.sample() for _ in range(n_samples)]
     swag_bn_params = []
     for i, sample in enumerate(swag_samples):
@@ -172,7 +170,7 @@ def fit_swag_and_precompute_bn_params(model, device, train_loader, max_num_model
 
 
 def predict_swag(swag_model, x, swag_samples, swag_bn_params):
-    """ Make predictions with SWAG on a single data batch (x, y) """
+    """ Make predictions with SWAG on a single batch"""
 
     swag_model.eval()
     swag_model.base.eval()

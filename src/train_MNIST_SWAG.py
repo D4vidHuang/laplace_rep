@@ -12,7 +12,7 @@ parser.add_argument('--seed', type=int, default=111)
 
 # paper settings
 parser.add_argument('--snapshots', type=int, default=40)
-parser.add_argument('--swa-lr',    type=float, default=1e-2)
+parser.add_argument('--swg-lr',    type=float, default=1e-2)
 parser.add_argument('--c-epochs',  type=int, default=1)
 parser.add_argument('--c-batches', type=int, default=None)
 parser.add_argument('--bn-subset', type=float, default=1.0)
@@ -33,9 +33,9 @@ swag_model, swag_samples, swag_bn = fit_swag_and_precompute_bn_params(
         device=device,
         train_loader=train_loader,
         max_num_models=args.snapshots,
-        swa_lr=args.swa_lr,
-        swa_c_epochs=args.c_epochs,
-        swa_c_batches=args.c_batches,
+        swg_lr=args.swg_lr,
+        swg_c_epochs=args.c_epochs,
+        swg_c_batches=args.c_batches,
         parallel=False,
         n_samples=30,
         bn_update_subset=args.bn_subset)

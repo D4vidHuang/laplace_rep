@@ -11,6 +11,7 @@ MNIST_pth = 'data'
 GERMAN_CREDIT_pth = 'data/GermanCredit'
 CIFAR10_pth = 'data'
 
+
 def get_mnist(batch_size=128):
     transform = transforms.ToTensor()
     train_dataset = datasets.MNIST(MNIST_pth, train=True, transform=transform, download=True)

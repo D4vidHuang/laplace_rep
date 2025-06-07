@@ -32,7 +32,7 @@ def collect_conf(loader):
     with torch.no_grad():
         for x, y in loader:
             x, y = x.to(device), y.to(device)
-            p = predict_swag(base, x, swag_samples, swag_bn_params)  # ← 作者逻辑
+            p = predict_swag(base, x, swag_samples, swag_bn_params)
             conf, pred = p.max(1)
             conf_list.append(conf.cpu())
             pred_list.append(pred.cpu())
@@ -49,4 +49,4 @@ labels = np.concatenate([np.ones_like(conf_id), np.zeros_like(conf_ood)])
 auroc_ood = roc_auc_score(labels, np.concatenate([conf_id, conf_ood]))
 
 print(f"[SWG] Accuracy: {acc_id * 100:.2f}%")
-print(f"[SWG] OOD Dataset: {args.ood.upper()}, Confidence: {conf_ood.mean()*100:.3f}, AUROC: {auroc_ood*100:.3f}")
+print(f"[SWG] OOD Dataset: {args.ood.upper()} | Confidence: {conf_ood.mean()*100:.3f} | AUROC: {auroc_ood*100:.3f}")

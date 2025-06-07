@@ -7,6 +7,7 @@ from utils.models import MLP, LeNet, set_seed
 import os
 import math
 
+
 def cosine_annealing_lr(epoch, total_epochs, initial_lr):
     """余弦退火学习率调度"""
     return initial_lr * 0.5 * (1 + math.cos(math.pi * epoch / total_epochs))
@@ -107,4 +108,4 @@ if __name__ == '__main__':
     
     # 评估整个集成
     ensemble_accuracy = evaluate_ensemble(models, test_loader)
-    print(f'\nEnsemble Test Accuracy: {ensemble_accuracy:.2f}%') 
+    print(f'\nEnsemble Test Accuracy: {ensemble_accuracy:.2f}%')
