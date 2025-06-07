@@ -31,7 +31,8 @@ def run_evaluation(model_name='lenet', mode='map', ood_dataset='emnist', batch_s
         la = Laplace(model,
                      likelihood='classification',
                      subset_of_weights='last_layer',
-                     hessian_structure=hessian)
+                     hessian_structure=hessian,
+                     backend=backend)
         # 使用新的命名格式加载LA模型
         la_model_path = f'models/MNIST_{mode}.pt'
         la.load_state_dict(torch.load(la_model_path, map_location=device))
