@@ -1,90 +1,77 @@
-import torch
-import torch.nn.functional as F
-from train_cifar10_VB import BayesianCNN
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
-import numpy as np
+import argparse, torch, numpy as np
 from sklearn.metrics import roc_auc_score
+from utils.datasets import get_cifar10, get_ood_cifar10
+from utils.models import WideResNetVB, set_seed
 
-def evaluate_vb_cifar10(n_samples=20):
+
+@torch.no_grad()
+def collect_conf_loader(model, loader, n_samples=15):
+    """
+    n_samples times MC：
+      - return mean_confidence (np.array) & predictions
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Load trained VB model
-    model = BayesianCNN().to(device)
-    model.load_state_dict(torch.load('models/cifar10_vb_best.pt'))
+    model.to(device)
     model.eval()
-    
-    # Data loading
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-    ])
-    
-    test_dataset = datasets.CIFAR10('data', train=False, transform=transform_test)
-    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
-    
-    # Evaluation with multiple forward passes
-    all_confidences = []
-    all_predictions = []
-    all_targets = []
-    correct = 0
-    total = 0
-    
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            batch_predictions = []
-            
-            # Multiple forward passes for uncertainty estimation
-            for _ in range(n_samples):
-                output = model(data)
-                probs = F.softmax(output, dim=1)
-                batch_predictions.append(probs)
-            
-            # Average predictions over multiple passes
-            batch_predictions = torch.stack(batch_predictions)  # [n_samples, batch_size, n_classes]
-            mean_predictions = batch_predictions.mean(0)  # [batch_size, n_classes]
-            
-            # Get predicted class and confidence
-            pred_confidence, pred_class = mean_predictions.max(1)
-            
-            # Update accuracy
-            correct += pred_class.eq(target).sum().item()
-            total += target.size(0)
-            
-            # Store results
-            all_confidences.extend(pred_confidence.cpu().numpy())
-            all_predictions.extend(pred_class.cpu().numpy())
-            all_targets.extend(target.cpu().numpy())
-    
-    # Calculate metrics
-    accuracy = 100. * correct / total
-    avg_confidence = np.mean(all_confidences) * 100
-    
-    # Calculate AUROC
-    # Convert to one-hot format for AUROC calculation
-    y_true = np.eye(10)[all_targets]
-    y_pred = np.eye(10)[all_predictions]
-    auroc = roc_auc_score(y_true, y_pred, multi_class='ovr', average='macro')
-    
-    # Print results in the same format as before
-    print(f"Accuracy: {accuracy:.1f}")
-    print(f"Average Confidence: {avg_confidence:.1f}")
-    print(f"AUROC: {auroc:.3f}")
-    
-    # Save results
-    np.savez('models/cifar10_vb_results.npz',
-             accuracy=accuracy,
-             confidence=all_confidences,
-             predictions=all_predictions,
-             targets=all_targets,
-             auroc=auroc)
+
+    conf_list = []
+    correct_list = []
+    for x, y in loader:
+        x, y = x.to(device), y.to(device)
+
+        # n_samples forward + softmax  → (n_samples, batch_size, num_classes)
+        outputs = torch.zeros(n_samples, x.size(0), 10, device=device)
+        for i in range(n_samples):
+            logits, _ = model(x)
+            outputs[i] = torch.softmax(logits, dim=1)
+
+        mean_probs = outputs.mean(dim=0)
+        conf, preds = mean_probs.max(dim=1)
+
+        conf_list.append(conf.cpu())
+        correct_list.append((preds == y).cpu())
+
+    all_conf = torch.cat(conf_list).numpy()
+    all_correct = torch.cat(correct_list).numpy()
+
+    return all_conf, all_correct
+
 
 if __name__ == '__main__':
-    import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_samples', type=int, default=20,
-                       help='Number of forward passes for uncertainty estimation')
+    parser.add_argument('--load-path', type=str, required=True,
+                        help='path to saved VB model weights')
+    parser.add_argument('--n_samples', type=int, default=10)
+    parser.add_argument('--ood', type=str, choices=['SVHN','CIFAR100'],
+                        help='optional OOD dataset')
+    parser.add_argument('--seed', type=int, default=111)
     args = parser.parse_args()
-    
-    evaluate_vb_cifar10(args.n_samples) 
+    set_seed(args.seed)
+
+    model = WideResNetVB(16, 4, num_classes=10, var0=1/33.0)
+    state = torch.load(args.load_path, map_location='cpu')
+    model.load_state_dict(state)
+
+    # 2. ID
+    _, id_loader = get_cifar10(batch_size=128)
+
+    id_conf, id_corr = collect_conf_loader(model, id_loader, args.n_samples)
+    id_acc = 100.0 * id_corr.mean()
+    id_mean_conf = id_conf.mean()
+    id_auroc = roc_auc_score(id_corr.astype(int), id_conf)
+
+    print(f"[VB] seed={args.seed} | ID Accuracy: {id_acc:.2f}% | "
+          f"ID-conf: {id_mean_conf:.4f} | ID-AUROC: {id_auroc:.4f}")
+
+    # 3. OOD
+    if args.ood:
+        ood_loader = get_ood_cifar10(args.ood, batch_size=128)
+        ood_conf, _ = collect_conf_loader(model, ood_loader, args.n_samples)
+
+        labels = np.concatenate([np.ones_like(id_conf), np.zeros_like(ood_conf)])
+        scores = np.concatenate([id_conf, ood_conf])
+        ood_auroc = roc_auc_score(labels, scores)
+        ood_mean_conf = ood_conf.mean()
+
+        print(f"[VB] OOD={args.ood.upper()} | OOD-conf: {ood_mean_conf*100:.3f} | "
+              f"OOD-AUROC: {ood_auroc*100:.3f}")

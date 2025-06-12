@@ -16,16 +16,16 @@ args = parser.parse_args()
 set_seed(args.seed)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-pack   = torch.load(args.pack, map_location=device)
+pack = torch.load(args.pack, map_location=device)
 
 # 1. load model
 base = SWAG(LeNet().to(device))
 base.load_state_dict(pack['model_state'])
-swag_samples   = pack['samples']
+swag_samples = pack['samples']
 swag_bn_params = pack['bn_params']
 
-_, _, id_loader  = load_MNIST(batch_size=128)
-ood_loader      = get_ood_mnist(args.ood, batch_size=128)
+_, _, id_loader = load_MNIST(batch_size=128)
+ood_loader = get_ood_mnist(args.ood, batch_size=128)
 
 def collect_conf(loader):
     conf_list, pred_list, label_list = [], [], []

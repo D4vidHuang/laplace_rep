@@ -46,6 +46,6 @@ print(f'SWAG finished in {(time.time()-t0):.1f}s')
 os.makedirs(args.save_dir, exist_ok=True)
 path = os.path.join(args.save_dir, f'swag_pack_seed{args.seed}.pt')
 torch.save({'model_state': swag_model.state_dict(),
-            'samples'    : swag_samples,
-            'bn_params'  : swag_bn}, path)
+            'samples': swag_samples,
+            'bn_params': swag_bn}, path)
 print(f'Saved to {path}')

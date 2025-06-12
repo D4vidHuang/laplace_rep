@@ -64,8 +64,7 @@ if __name__ == '__main__':
     save_pth = os.path.join(save_dir, save_file)
 
     os.makedirs(save_dir, exist_ok=True)
-    
-   
+
     batch_size = 128
     # 这里我按照它设置的，但是我觉得不对，我先改5个epoch把后面的做了
     epochs = 100

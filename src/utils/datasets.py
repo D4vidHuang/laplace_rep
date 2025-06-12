@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split
 MNIST_pth = 'data'
 GERMAN_CREDIT_pth = 'data/GermanCredit'
 CIFAR10_pth = 'data'
+SVHN_pth = 'data/SVHN'
 
 
 def get_mnist(batch_size=128):
@@ -69,6 +70,25 @@ def get_cifar10(batch_size=128):
     
     return train_loader, test_loader
 
+
+def get_ood_cifar10(name, batch_size=512):
+    if name == 'SVHN':
+        svhn_tforms = transforms.Compose([transforms.ToTensor(),
+                                          transforms.Normalize((0.4376821, 0.4437697, 0.47280442),
+                                                               (0.19803012, 0.20101562, 0.19703614))])
+        dataset = datasets.SVHN(SVHN_pth, split='test',
+                                          transform=svhn_tforms,
+                                          download=False)
+    elif name == 'CIFAR100':
+        cifar100_tforms = transforms.Compose([transforms.ToTensor(),
+                                              transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                                                   (0.2023, 0.1994, 0.2010))])
+        dataset = datasets.CIFAR100(CIFAR10_pth, train=False,
+                                                  transform=cifar100_tforms,
+                                                  download=True)
+    else:
+        raise ValueError('Choose one out of SVHN and CIFAR-100.')
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
 class GermanCreditDataset(Dataset):
     def __init__(self, features, labels):

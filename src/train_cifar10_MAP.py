@@ -70,12 +70,12 @@ if __name__ == '__main__':
 
     batch_size = 128
     # 这里我按照它设置的，但是我觉得不对，我先改5个epoch把后面的做了
-    epochs = 100
+    epochs = 150
     initial_lr = 0.1
     weight_decay = 5e-4
 
     train_loader, test_loader = get_cifar10(batch_size=batch_size)
-    model = WideResNet(28, 10, num_classes=10)  # 固定使用WRN
+    model = WideResNet(16, 4, num_classes=10)  # 固定使用WRN
 
     print(f"Training WRN on CIFAR10 for {epochs} epochs...")
     print(f"Initial learning rate: {initial_lr}, Weight decay: {weight_decay}")
