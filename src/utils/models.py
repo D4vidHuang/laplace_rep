@@ -360,3 +360,70 @@ class WideResNetVB(nn.Module):
         kl_total += kl
 
         return out, kl_total
+
+
+class SWAG(nn.Module):
+    """
+    SWAG (Stochastic Weight Averaging Gaussian) implementation
+    Based on the paper: https://arxiv.org/abs/1902.02476
+    """
+
+    def __init__(self, base_model, max_models=40):
+        super(SWAG, self).__init__()
+        self.base_model = base_model
+        self.max_models = max_models
+        self.n_models = 0
+
+        # Initialize parameter lists for storage
+        self.params = []
+        for param in self.base_model.parameters():
+            self.params.append(param.data.clone())
+
+        # Register buffers for each parameter tensor
+        self.n_params = len(list(self.base_model.parameters()))
+        for i, param in enumerate(self.base_model.parameters()):
+            self.register_buffer(f'mean_{i}', param.data.clone())
+            self.register_buffer(f'sq_mean_{i}', param.data.clone() ** 2)
+
+    def forward(self, x):
+        return self.base_model(x)
+
+    def update_parameters(self, model):
+        """Update running average of parameters"""
+        self.n_models += 1
+        n = self.n_models
+
+        for i, param in enumerate(model.parameters()):
+            mean = getattr(self, f'mean_{i}')
+            sq_mean = getattr(self, f'sq_mean_{i}')
+
+            if n == 1:
+                mean.data.copy_(param.data)
+                sq_mean.data.copy_(param.data ** 2)
+            else:
+                mean.data.mul_((n - 1) / n).add_(param.data / n)
+                sq_mean.data.mul_((n - 1) / n).add_((param.data ** 2) / n)
+
+    def sample(self, scale=1.0, diag_only=True):
+        """Sample from the SWAG posterior"""
+        if diag_only:
+            # Only use diagonal covariance
+            for i, param in enumerate(self.base_model.parameters()):
+                mean = getattr(self, f'mean_{i}')
+                sq_mean = getattr(self, f'sq_mean_{i}')
+                var = torch.clamp(sq_mean - mean ** 2, 1e-30)
+                eps = torch.randn_like(var)
+                param.data.copy_(mean + scale * torch.sqrt(var) * eps)
+        else:
+            # Full covariance version can be implemented here
+            raise NotImplementedError("Full covariance sampling not implemented yet")
+
+    def get_space(self):
+        """Get the space requirements in bytes"""
+        space = 0
+        for i in range(self.n_params):
+            mean = getattr(self, f'mean_{i}')
+            sq_mean = getattr(self, f'sq_mean_{i}')
+            space += mean.numel() * 4  # 4 bytes per float32
+            space += sq_mean.numel() * 4
+        return space

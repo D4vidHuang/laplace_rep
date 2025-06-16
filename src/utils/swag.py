@@ -153,7 +153,7 @@ def fit_swag_and_precompute_bn_params(model, device, train_loader, max_num_model
     # fit SWAG on training data
     nll_fun = torch.nn.CrossEntropyLoss(reduction='mean')
     swag_model = fit_swag(copy.deepcopy(model), device, train_loader, nll_fun,
-                    diag_only=False, max_num_models=max_num_models,
+                    diag_only=True, max_num_models=max_num_models,
                     swg_lr=swg_lr, swg_c_epochs=swg_c_epochs,
                     swg_c_batches=swg_c_batches, parallel=parallel)
     swag_model.base = swag_model.base.to(device)
@@ -226,7 +226,66 @@ class SWAG(torch.nn.Module):
 
                 params.append((module, name_full))
 
-    def sample(self, scale=0.5, cov=True, seed=None):
+    def get_mean_vector(self, batchnorm_layers, mask=None):
+        mean_list = []
+        for module, name in self.params:
+            name_full = name.replace("-", ".")
+            if 'weight' in name_full and name_full not in batchnorm_layers:
+                mean = module.__getattr__("%s_mean" % name)
+                if mask is not None:
+                    mean = mean[mask[name_full].nonzero(as_tuple=True)]
+                mean_list.append(mean.cpu())
+        return flatten(mean_list)
+
+    def get_variance_vector(self, batchnorm_layers, mask=None):
+        mean_list = []
+        sq_mean_list = []
+
+        for module, name in self.params:
+            name_full = name.replace("-", ".")
+            if 'weight' in name_full and name_full not in batchnorm_layers:
+                mean = module.__getattr__("%s_mean" % name)
+                sq_mean = module.__getattr__("%s_sq_mean" % name)
+
+                if mask is not None:
+                    mean = mean[mask[name_full].nonzero(as_tuple=True)]
+                    sq_mean = sq_mean[mask[name_full].nonzero(as_tuple=True)]
+
+                mean_list.append(mean.cpu())
+                sq_mean_list.append(sq_mean.cpu())
+
+        mean = flatten(mean_list)
+        sq_mean = flatten(sq_mean_list)
+
+        variances = torch.clamp(sq_mean - mean ** 2, self.var_clamp)
+
+        return variances
+
+    def get_covariance_matrix(self, batchnorm_layers, eps=1e-10):
+        if self.no_cov_mat:
+            raise RuntimeError("No covariance matrix was estimated!")
+
+        cov_mat_sqrt_list = []
+        for module, name in self.params:
+            name_full = name.replace("-", ".")
+            if 'weight' in name_full and name_full not in batchnorm_layers:
+                cov_mat_sqrt = module.__getattr__("%s_cov_mat_sqrt" % name)
+                cov_mat_sqrt_list.append(cov_mat_sqrt.cpu())
+
+        # build low-rank covariance matrix
+        cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1)
+        print(cov_mat_sqrt.shape)
+        cov_mat = torch.matmul(cov_mat_sqrt.t(), cov_mat_sqrt)
+        cov_mat /= (self.max_num_models - 1)
+        print(cov_mat.shape)
+
+        # obtain covariance matrix by adding variances (+ eps for numerical stability) to diagonal and scaling
+        var = self.get_variance_vector(batchnorm_layers, mask=self.mask) + eps
+        cov_mat.add_(torch.diag(var)).mul_(0.5)
+
+        return cov_mat
+
+    def sample(self, scale=0.5, cov=False, seed=None):
         if seed is not None:
             torch.manual_seed(seed)
 
